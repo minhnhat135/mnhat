@@ -182,16 +182,44 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    rank = USER_RANKS.get(user.id, "none")
-    msg = f"""
+    # Nếu không có username được truyền vào, trả về thông tin người dùng hiện tại
+    if not context.args:
+        user = update.effective_user
+        rank = USER_RANKS.get(user.id, "none")
+        msg = f"""
 👤 <b>Thông tin người dùng</b>
 
 <b>Tên:</b> {user.full_name}
 <b>ID:</b> {user.id}
+<b>Username:</b> @{user.username or 'N/A'}
 <b>Rank:</b> {rank}
 """
-    await update.message.reply_html(msg)
+        await update.message.reply_html(msg)
+        return
+
+    # Nếu có username dạng @username
+    target_username = context.args[0].lstrip('@').lower()
+    found = False
+    for member_id, rank in USER_RANKS.items():
+        try:
+            member = await context.bot.get_chat(member_id)
+            if member.username and member.username.lower() == target_username:
+                msg = f"""
+👤 <b>Thông tin người dùng</b>
+
+<b>Tên:</b> {member.full_name}
+<b>ID:</b> {member.id}
+<b>Username:</b> @{member.username}
+<b>Rank:</b> {rank}
+"""
+                await update.message.reply_html(msg)
+                found = True
+                break
+        except:
+            continue
+
+    if not found:
+        await update.message.reply_text(f"❌ Không tìm thấy người dùng @{target_username}.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = """
