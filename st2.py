@@ -1,8 +1,7 @@
 import requests, re, time, asyncio
 from telegram import Update, InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor
 
 # ========== CẤU HÌNH ========== #
 TELEGRAM_TOKEN = "7482122603:AAG-d2VwSvySZhKfNYpjz9HXnlduvgETYQ4"
@@ -16,27 +15,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "cookie": COOKIES
 }
-
-# ========== LỆNH /chk ========== #
-async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ALLOWED_USERS:
-        await update.message.reply_text("❌ Bạn không có quyền sử dụng bot.")
-        return
-
-    if not context.args:
-        await update.message.reply_text("❌ Dùng: /chk cc|mes|ano|cvv")
-        return
-
-    raw = context.args[0]
-    match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', raw)
-    if not match:
-        await update.message.reply_text("❌ Sai cú pháp.")
-        return
-
-    await update.message.reply_text("🕐 Đang kiểm tra...")
-    result = await process_card(*match.groups(), user_id)
-    await update.message.reply_html(result)
 
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
@@ -103,19 +81,33 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
     except Exception as e:
         return f"❌ Lỗi xử lý: {str(e)}"
 
-# ========== LỆNH /chkall với đa luồng (5 luồng) ========== #
-async def chkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ========== CÁC HÀM COMMAND ========== #
+async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("❌ Bạn không có quyền sử dụng bot.")
+        return
+    if not context.args:
+        await update.message.reply_text("❌ Dùng: /chk cc|mes|ano|cvv")
+        return
+    raw = context.args[0]
+    match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', raw)
+    if not match:
+        await update.message.reply_text("❌ Sai cú pháp.")
+        return
+    await update.message.reply_text("🕐 Đang kiểm tra...")
+    result = await process_card(*match.groups(), user_id)
+    await update.message.reply_html(result)
+
+async def chkall_generic(update: Update, context: ContextTypes.DEFAULT_TYPE, max_concurrent: int = 5):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Bạn không có quyền.")
         return
-
     lines = update.message.text.strip().splitlines()[1:]
-    await update.message.reply_text(f"🔄 Đang xử lý {len(lines)} thẻ với 5 luồng...")
-
+    await update.message.reply_text(f"🔄 Đang xử lý {len(lines)} thẻ với {max_concurrent} luồng...")
     results = []
-    sem = asyncio.Semaphore(5)
-
+    sem = asyncio.Semaphore(max_concurrent)
     async def worker(line):
         match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', line.strip())
         if not match:
@@ -124,16 +116,17 @@ async def chkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with sem:
             res = await process_card(*match.groups(), user_id)
             results.append(res)
-
     await asyncio.gather(*(worker(line) for line in lines))
-    await update.message.reply_html("\n".join(results[:30]))  # nếu dài quá sẽ chia tiếp tin nhắn
-    
-# ========== LỆNH /multi ========== #
+    for chunk in range(0, len(results), 30):
+        await update.message.reply_html("\n".join(results[chunk:chunk+30]))
+
+async def chkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await chkall_generic(update, context, max_concurrent=5)
+
 async def multi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
         await update.message.reply_text("❌ Bạn không có quyền.")
         return
-
     path = "cards.txt"
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -141,49 +134,34 @@ async def multi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await update.message.reply_text("❌ Không tìm thấy file cards.txt")
         return
-
-    loop = asyncio.get_event_loop()
-    results = []
-    approved, declined = [], []
-
-    async def worker(card_line):
-        match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', card_line)
+    results, approved, declined = [], [], []
+    await update.message.reply_text(f"🔁 Bắt đầu kiểm tra {len(cards)} dòng...")
+    sem = asyncio.Semaphore(5)
+    async def worker(card):
+        match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', card)
         if not match:
             return
-        res = await process_card(*match.groups(), update.effective_user.id)
-        if "✅ Approved" in res:
-            approved.append(card_line)
-        else:
-            declined.append(card_line)
-
-    await update.message.reply_text(f"🔁 Bắt đầu kiểm tra {len(cards)} dòng...")
-
-    sem = asyncio.Semaphore(5)
-    async def limited_worker(card):
         async with sem:
-            await worker(card)
-
-    await asyncio.gather(*(limited_worker(c) for c in cards))
-
-    # Ghi file kết quả
+            res = await process_card(*match.groups(), update.effective_user.id)
+            if "✅ Approved" in res:
+                approved.append(card)
+            else:
+                declined.append(card)
+    await asyncio.gather(*(worker(c) for c in cards))
     with open("fileApproved.txt", "w") as f:
         f.write("\n".join(approved))
     with open("fileDecline.txt", "w") as f:
         f.write("\n".join(declined))
-
     await update.message.reply_document(InputFile("fileApproved.txt"))
     await update.message.reply_document(InputFile("fileDecline.txt"))
 
-# ========== LỆNH /add ========== #
 async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Bạn không phải quản trị viên.")
         return
-
     if not context.args:
         await update.message.reply_text("Dùng: /add <user_id>")
         return
-
     try:
         new_id = int(context.args[0])
         ALLOWED_USERS.add(new_id)
@@ -192,7 +170,6 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
-# ========== LỆNH /info ========== #
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     rank = USER_RANKS.get(user.id, "none")
@@ -213,5 +190,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("info", info))
     app.add_handler(CommandHandler("chkall", chkall))
     app.add_handler(CommandHandler("multi", multi))
+    for i in range(1, 21):
+        app.add_handler(CommandHandler(f"chkall{i}", lambda u, c, i=i: chkall_generic(u, c, i)))
     print("✅ Bot đang chạy...")
     app.run_polling()
