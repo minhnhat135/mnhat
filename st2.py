@@ -204,6 +204,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>/add</b> user_id — Thêm người dùng
 <b>/info</b> — Thông tin người dùng
 <b>/help</b> — Danh sách lệnh
+bot by: mn
 """
     await update.message.reply_html(msg)
 
@@ -218,6 +219,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>/add</b> user_id — Thêm người dùng
 <b>/info</b> — Thông tin người dùng
 <b>/help</b> — Danh sách lệnh
+bot by: mn
 """
     await update.message.reply_html(msg)
 
