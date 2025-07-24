@@ -176,7 +176,7 @@ async def multi_check_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ Bạn không có quyền.")
         return
 
-    path = "/mnt/data/cards.txt"
+    path = "cards.txt"
     if not os.path.exists(path):
         await update.message.reply_text("❌ Không tìm thấy file cards.txt.")
         return
@@ -208,7 +208,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Chỉ nhận file .txt")
         return
     file = await context.bot.get_file(doc.file_id)
-    await file.download_to_drive("/mnt/data/cards.txt")
+    await file.download_to_drive("cards.txt")
     await update.message.reply_text("📁 Đã lưu file thành cards.txt. Gõ /multi để bắt đầu.")
 
 # ========== CHẠY BOT ==========
