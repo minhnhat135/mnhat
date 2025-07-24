@@ -103,7 +103,7 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
     except Exception as e:
         return f"❌ Lỗi xử lý: {str(e)}"
 
-# ========== LỆNH /chkall ========== #
+# ========== LỆNH /chkall với đa luồng (5 luồng) ========== #
 async def chkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ALLOWED_USERS:
@@ -111,19 +111,23 @@ async def chkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = update.message.text.strip().splitlines()[1:]
-    await update.message.reply_text(f"🔄 Đang xử lý {len(lines)} thẻ...")
-    results = []
+    await update.message.reply_text(f"🔄 Đang xử lý {len(lines)} thẻ với 5 luồng...")
 
-    for line in lines:
+    results = []
+    sem = asyncio.Semaphore(5)
+
+    async def worker(line):
         match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', line.strip())
         if not match:
             results.append(f"❌ Sai cú pháp: {line}")
-            continue
-        res = await process_card(*match.groups(), user_id)
-        results.append(res)
+            return
+        async with sem:
+            res = await process_card(*match.groups(), user_id)
+            results.append(res)
 
-    await update.message.reply_html("\n".join(results[:50]))
-
+    await asyncio.gather(*(worker(line) for line in lines))
+    await update.message.reply_html("\n".join(results[:30]))  # nếu dài quá sẽ chia tiếp tin nhắn
+    
 # ========== LỆNH /multi ========== #
 async def multi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ALLOWED_USERS:
