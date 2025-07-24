@@ -104,3 +104,10 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi xử lý: {str(e)}")
+
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("chk", chk))
+    app.add_handler(CommandHandler("add", add_user))
+    print("✅ Bot đang chạy...")
+    app.run_polling()
