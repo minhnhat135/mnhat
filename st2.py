@@ -1,4 +1,5 @@
 import requests, re, time, asyncio
+import random, string  # <-- Thêm dòng này
 from telegram import Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from bs4 import BeautifulSoup
