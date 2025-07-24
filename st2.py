@@ -27,10 +27,22 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
         if not token_tag:
             return "❌ Không lấy được CSRF token."
 
-        r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
-        if r2.status_code != 200:
-            return "❌ Lỗi lấy setup_intent"
-        setid = r2.json().get("setup_intent", "")
+        # Retry tối đa 5 lần nếu lỗi setup_intent
+setid = ""
+for attempt in range(5):
+    r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
+    if r2.status_code == 200:
+        try:
+            setid = r2.json().get("setup_intent", "")
+            if setid:
+                break  # thành công
+        except Exception:
+            pass
+    time.sleep(1)  # chờ 1s trước lần retry tiếp theo
+
+if not setid:
+    return "❌ Lỗi lấy setup_intent (sau 5 lần thử)"
+
         setin = setid.split("_secret_")[0]
 
         payload = {
