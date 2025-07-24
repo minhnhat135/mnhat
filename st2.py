@@ -132,7 +132,7 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 <b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
 <b>Decline Code:</b> {decline}
 
-<b>Gateway:</b> Stripe (Practice.do)
+<b>Gateway:</b> Stripe V6
 <b>Card:</b> {scheme.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
