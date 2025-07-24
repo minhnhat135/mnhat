@@ -207,6 +207,20 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
     await update.message.reply_html(msg)
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = """
+<b>🔊 Hướng dẫn lệnh</b>
+
+<b>/chk</b> cc|mes|ano|cvv — Kiểm tra 1 thẻ
+<b>/chkall</b> \ncc|mes|ano|cvv... — Kiểm tra nhiều thẻ (5 luồng)
+<b>/chkallX</b> (X = số luồng, vd /chkall10)
+<b>/multi</b> — Kiểm tra file cards.txt (tự ghi kết quả)
+<b>/add</b> user_id — Thêm người dùng
+<b>/info</b> — Thông tin người dùng
+<b>/help</b> — Danh sách lệnh
+"""
+    await update.message.reply_html(msg)
+
 # ========== CHẠY BOT ========== #
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -216,6 +230,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("chkall", chkall))
     app.add_handler(CommandHandler("multi", multi))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("start", start))
     for i in range(1, 21):
         app.add_handler(CommandHandler(f"chkall{i}", lambda u, c, i=i: chkall_generic(u, c, i)))
     print("✅ Bot đang chạy...")
