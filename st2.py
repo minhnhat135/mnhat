@@ -27,7 +27,7 @@ async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     raw = context.args[0]
-    match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{4})\|(\d{3,4})$', raw)
+    match = re.match(r'^(\d{12,19})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})$', raw)
 
     if not match:
         await update.message.reply_text("❌ Sai cú pháp.")
