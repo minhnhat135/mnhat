@@ -91,18 +91,22 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 
         r4 = requests.post(f"https://api.stripe.com/v1/setup_intents/{n}/confirm", data=form_data, headers=headers_json)
         j4 = r4.json()
-if status == "succeeded":
-    status_label = "✅ Approved"
-elif status in ["requires_action", "requires_source_action", "requires_confirmation"]:
-    status_label = "⚠️ Requires 3DS / Action"
-elif decline == "insufficient_funds":
-    status_label = "⚠️ Insufficient Funds"
-elif decline in ["incorrect_cvc", "invalid_cvc"]:
-    status_label = "⚠️ Invalid CVC"
-elif decline:
-    status_label = "❌ Declined"
-else:
-    status_label = "❓ Unknown Status"
+        status = j4.get("status", "UNKNOWN")
+        decline = j4.get("error", {}).get("decline_code") or "NONE"
+
+        # Phân loại trạng thái kết quả Stripe
+        if status == "succeeded":
+            status_label = "✅ Approved"
+        elif status in ["requires_action", "requires_source_action", "requires_confirmation"]:
+            status_label = "⚠️ Requires 3DS / Action"
+        elif decline == "insufficient_funds":
+            status_label = "⚠️ Insufficient Funds"
+        elif decline in ["incorrect_cvc", "invalid_cvc"]:
+            status_label = "⚠️ Invalid CVC"
+        elif decline != "NONE":
+            status_label = "❌ Declined"
+        else:
+            status_label = "❓ Unknown Status"
 
         # Check BIN
         bin_code = cc[:6]
@@ -119,10 +123,10 @@ else:
 <b>✅ CHECK RESULT</b>
 
 <b>CC:</b> {cc}|{mes}|{ano}|{cvv}
-<b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
+<b>Status:</b> {status_label}
 <b>Decline Code:</b> {decline}
 
-<b>Gateway:</b>  → Stripe V6
+<b>Gateway:</b> Practice.do → Stripe
 <b>Card:</b> {card.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
