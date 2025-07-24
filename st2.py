@@ -1,4 +1,7 @@
-import time
+import requests, re, time
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from bs4 import BeautifulSoup
 
 async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ALLOWED_USER_ID:
